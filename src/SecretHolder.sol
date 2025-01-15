@@ -1,4 +1,4 @@
-pragma solidity ^0.8.20;
+pragma solidity 0.8.26;
 
 import "openzeppelin-contracts/contracts/utils/cryptography/ECDSA.sol";
 
@@ -28,12 +28,12 @@ contract SecretHolder {
     mapping(uint256 => Secret) public secrets;
     uint256 public secretCount = 0;
 
+    event SecretStored(uint256 indexed id, bytes32 indexed commitment, address partyA, address partyB);
+    event SecretRevealed(uint256 indexed id, address indexed revealer, bytes message);
+
     error InvalidMessageHash();
     error WrongSignatureCount();
     error BadSignature();
-
-    event SecretStored(uint256 indexed id, bytes32 indexed commitment, address partyA, address partyB);
-    event SecretRevealed(uint256 indexed id, address indexed revealer, bytes message);
 
     constructor() {}
 
@@ -46,7 +46,7 @@ contract SecretHolder {
      * @param salt - (uint256) The salt used to calculate the hash.
      * @param signatures - (Signature[2]) ECDSA signatures of the calculated hash from the involved parties.
      */
-    function commitSecret(bytes32 secretHash, uint256 salt, bytes[] memory signatures) public {
+    function commitSecret(bytes32 secretHash, uint256 salt, bytes[] memory signatures) external {
         require(signatures.length == 2, WrongSignatureCount());
 
         address signerA = ECDSA.recover(secretHash, signatures[0]);
@@ -54,7 +54,6 @@ contract SecretHolder {
 
         secrets[secretCount] = Secret({commitment: secretHash, salt: salt, partyA: signerA, partyB: signerB});
 
-        // TODO: emit
         emit SecretStored(secretCount, secretHash, signerA, signerB);
 
         secretCount++;
@@ -67,7 +66,7 @@ contract SecretHolder {
      * @param secretMessage - The commited message, without salting.
      * @param signature - Signature of the revealing party.
      */
-    function revealSecret(uint256 id, bytes calldata secretMessage, bytes memory signature) public {
+    function revealSecret(uint256 id, bytes calldata secretMessage, bytes memory signature) external {
         Secret storage secret = secrets[id];
 
         bytes32 hash = keccak256(abi.encodePacked(secretMessage, secret.salt));
