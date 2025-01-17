@@ -9,7 +9,6 @@ import "openzeppelin-contracts/contracts/utils/cryptography/EIP712.sol";
  */
 contract SecretHolder is EIP712 {
     bytes32 private constant SECRET_TYPEHASH = keccak256("Secret(bytes32 hash,uint256 salt)");
-    bytes32 private constant REVEAL_TYPEHASH = keccak256("Reveal(uint256 id,bytes message)");
 
     struct Secret {
         bytes32 commitment;
@@ -27,7 +26,7 @@ contract SecretHolder is EIP712 {
 
     error InvalidMessageHash();
     error WrongSignatureCount();
-    error BadSignature();
+    error ThirdPartyCantReveal();
 
     constructor() EIP712("SecretHolder", "0.1") {}
 
@@ -65,27 +64,15 @@ contract SecretHolder is EIP712 {
      * @dev The stored secret metadata will be deleted from the contract after successful execution.
      * @param id - The identifier of the previously commited secret.
      * @param secretMessage - The commited message, without salting.
-     * @param signature - Signature of the revealing party.
      */
-    function revealSecret(uint256 id, bytes memory secretMessage, bytes memory signature) external {
+    function revealSecret(uint256 id, string memory secretMessage) external {
         Secret storage secret = secrets[id];
-
-        bytes32 revealHash = buildRevealHash(id, secretMessage);
-
-        address signer = ECDSA.recover(revealHash, signature);
-
-        require(signer == secret.partyA || signer == secret.partyB, BadSignature());
+        require(msg.sender == secret.partyA || msg.sender == secret.partyB, ThirdPartyCantReveal());
 
         bytes32 hash = keccak256(abi.encodePacked(secretMessage, secret.salt));
         require(hash == secret.commitment, InvalidMessageHash());
 
-        emit SecretRevealed(id, signer, secretMessage);
-
+        emit SecretRevealed(id, msg.sender, bytes(secretMessage));
         delete secrets[id];
-    }
-
-    function buildRevealHash(uint256 id, bytes memory secretMessage) public view returns (bytes32) {
-        bytes32 structHash = keccak256(abi.encode(REVEAL_TYPEHASH, id, secretMessage));
-        return _hashTypedDataV4(structHash);
     }
 }
