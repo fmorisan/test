@@ -7,7 +7,7 @@ import { useLocation } from 'react-router-dom'
 export default function Commit() {
     const location = useLocation()
 
-    let receivedData = {sig: undefined, message: undefined, salt: BigInt(0)}
+    let receivedData = {sig: undefined, message: undefined, salt: BigInt(0), address: undefined}
 
     if (location.hash) {
         console.log('recv', location.hash)
@@ -23,7 +23,7 @@ export default function Commit() {
                 <CardHeader>
                     <CardTitle>Commit a secret</CardTitle>
                 </CardHeader>
-                <SecretForm otherSignature={receivedData.sig} salt={receivedData.salt} message={receivedData.message} />
+                <SecretForm otherSignature={receivedData.sig} salt={receivedData.salt} message={receivedData.message} otherSigner={receivedData.address}/>
             </Card>
         </>
     )

@@ -33,11 +33,14 @@ contract CounterTest is Test {
         bytes memory message = "This is a test message";
         bytes32 secretHash = keccak256(abi.encodePacked(message, salt));
 
-        bytes32 structHash = secretHolder.buildCommitHash(secretHash, salt);
+        uint256 alice_nonce = secretHolder.nonces(alice);
+        uint256 bob_nonce = secretHolder.nonces(bob);
+        bytes32 aliceStructHash = secretHolder.buildCommitHash(secretHash, salt, alice_nonce);
+        bytes32 bobStructHash = secretHolder.buildCommitHash(secretHash, salt, bob_nonce);
 
         bytes[] memory signatures = new bytes[](2);
-        (uint8 alice_v, bytes32 alice_r, bytes32 alice_s) = vm.sign(alice_pk, structHash);
-        (uint8 bob_v, bytes32 bob_r, bytes32 bob_s) = vm.sign(bob_pk, structHash);
+        (uint8 alice_v, bytes32 alice_r, bytes32 alice_s) = vm.sign(alice_pk, aliceStructHash);
+        (uint8 bob_v, bytes32 bob_r, bytes32 bob_s) = vm.sign(bob_pk, bobStructHash);
 
         // NOTE: OZ's ECDSA library expects the signature to be formed this way.
         signatures[0] = abi.encodePacked(alice_r, alice_s, alice_v);
@@ -45,7 +48,7 @@ contract CounterTest is Test {
 
         vm.expectEmit(false, true, true, true);
         emit SecretHolder.SecretStored(0, secretHash, alice, bob);
-        secretHolder.commitSecret(secretHash, salt, signatures);
+        secretHolder.commitSecret(secretHash, salt, alice_nonce, bob_nonce, signatures);
 
         assertEq(secretHolder.secretCount(), secretCountBefore + 1);
         
@@ -67,11 +70,14 @@ contract CounterTest is Test {
         bytes memory message = "This is a test message";
         bytes32 secretHash = keccak256(abi.encodePacked(message, salt));
 
-        bytes32 structHash = secretHolder.buildCommitHash(secretHash, salt);
+        uint256 alice_nonce = secretHolder.nonces(vm.addr(pk_1));
+        uint256 bob_nonce = secretHolder.nonces(vm.addr(pk_2));
+        bytes32 aliceStructHash = secretHolder.buildCommitHash(secretHash, salt, alice_nonce);
+        bytes32 bobStructHash = secretHolder.buildCommitHash(secretHash, salt, bob_nonce);
 
         bytes[] memory signatures = new bytes[](2);
-        (uint8 alice_v, bytes32 alice_r, bytes32 alice_s) = vm.sign(pk_1, structHash);
-        (uint8 bob_v, bytes32 bob_r, bytes32 bob_s) = vm.sign(pk_2, structHash);
+        (uint8 alice_v, bytes32 alice_r, bytes32 alice_s) = vm.sign(pk_1, aliceStructHash);
+        (uint8 bob_v, bytes32 bob_r, bytes32 bob_s) = vm.sign(pk_2, bobStructHash);
 
         // NOTE: OZ's ECDSA library expects the signature to be formed this way.
         signatures[0] = abi.encodePacked(alice_r, alice_s, alice_v);
@@ -79,22 +85,26 @@ contract CounterTest is Test {
 
         vm.expectEmit(false, true, true, true);
         emit SecretHolder.SecretStored(0, secretHash, vm.addr(pk_1), vm.addr(pk_2));
-        secretHolder.commitSecret(secretHash, salt, signatures);
+        secretHolder.commitSecret(secretHash, salt, alice_nonce, bob_nonce, signatures);
     }
 
     function _commitMessage(bytes memory message, uint256 salt) internal returns (uint256 id) {
         bytes32 secretHash = keccak256(abi.encodePacked(message, salt));
-        bytes32 structHash = secretHolder.buildCommitHash(secretHash, salt);
+
+        uint256 alice_nonce = secretHolder.nonces(alice);
+        uint256 bob_nonce = secretHolder.nonces(bob);
+        bytes32 aliceStructHash = secretHolder.buildCommitHash(secretHash, salt, alice_nonce);
+        bytes32 bobStructHash = secretHolder.buildCommitHash(secretHash, salt, bob_nonce);
 
         bytes[] memory signatures = new bytes[](2);
-        (uint8 alice_v, bytes32 alice_r, bytes32 alice_s) = vm.sign(alice_pk, structHash);
-        (uint8 bob_v, bytes32 bob_r, bytes32 bob_s) = vm.sign(bob_pk, structHash);
+        (uint8 alice_v, bytes32 alice_r, bytes32 alice_s) = vm.sign(alice_pk, aliceStructHash);
+        (uint8 bob_v, bytes32 bob_r, bytes32 bob_s) = vm.sign(bob_pk, bobStructHash);
 
         // NOTE: OZ's ECDSA library expects the signature to be formed this way.
         signatures[0] = abi.encodePacked(alice_r, alice_s, alice_v);
         signatures[1] = abi.encodePacked(bob_r, bob_s, bob_v);
 
-        secretHolder.commitSecret(secretHash, salt, signatures);
+        secretHolder.commitSecret(secretHash, salt, alice_nonce, bob_nonce, signatures);
 
         id = secretHolder.secretCount() - 1;
     }
@@ -140,22 +150,28 @@ contract CounterTest is Test {
     function test_commit_cant_replay() public {
         bytes memory message = "Test";
         uint256 salt = 0xFFFFFFFF;
-        _commitMessage(message, salt);
-
         // NOTE: Signing logic is rolled into this function since we want to knwo which call reverts
         //       and _commitMessage first calls a view function, which does not revert
         bytes32 secretHash = keccak256(abi.encodePacked(message, salt));
-        bytes32 structHash = secretHolder.buildCommitHash(secretHash, salt);
+
+        uint256 alice_nonce = secretHolder.nonces(alice);
+        uint256 bob_nonce = secretHolder.nonces(bob);
+
+        bytes32 aliceStructHash = secretHolder.buildCommitHash(secretHash, salt, alice_nonce);
+        bytes32 bobStructHash = secretHolder.buildCommitHash(secretHash, salt, bob_nonce);
 
         bytes[] memory signatures = new bytes[](2);
-        (uint8 alice_v, bytes32 alice_r, bytes32 alice_s) = vm.sign(alice_pk, structHash);
-        (uint8 bob_v, bytes32 bob_r, bytes32 bob_s) = vm.sign(bob_pk, structHash);
+        (uint8 alice_v, bytes32 alice_r, bytes32 alice_s) = vm.sign(alice_pk, aliceStructHash);
+        (uint8 bob_v, bytes32 bob_r, bytes32 bob_s) = vm.sign(bob_pk, bobStructHash);
 
         // NOTE: OZ's ECDSA library expects the signature to be formed this way.
         signatures[0] = abi.encodePacked(alice_r, alice_s, alice_v);
         signatures[1] = abi.encodePacked(bob_r, bob_s, bob_v);
 
+        secretHolder.commitSecret(secretHash, salt, alice_nonce, bob_nonce, signatures);
+
+        // NOTE: we expect same signature usage to revert
         vm.expectRevert();
-        secretHolder.commitSecret(secretHash, salt, signatures);
+        secretHolder.commitSecret(secretHash, salt, alice_nonce, bob_nonce, signatures);
     }
 }

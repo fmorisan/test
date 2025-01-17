@@ -8,7 +8,7 @@ import "openzeppelin-contracts/contracts/utils/cryptography/EIP712.sol";
  * @author Felipe Buiras
  */
 contract SecretHolder is EIP712 {
-    bytes32 private constant SECRET_TYPEHASH = keccak256("Secret(bytes32 hash,uint256 salt)");
+    bytes32 private constant SECRET_TYPEHASH = keccak256("Secret(bytes32 hash,uint256 salt,uint256 nonce)");
 
     struct Secret {
         bytes32 commitment;
@@ -22,7 +22,7 @@ contract SecretHolder is EIP712 {
     uint256 public secretCount = 0;
 
     // @dev We must know if a signature has already been used in order to prevent replay attacks.
-    mapping(bytes32 => bool) internal signatureHashUsed;
+    mapping(address => uint256) public nonces;
 
     event SecretStored(uint256 indexed id, bytes32 indexed commitment, address partyA, address partyB);
     event SecretRevealed(uint256 indexed id, address indexed revealer, bytes message);
@@ -30,8 +30,7 @@ contract SecretHolder is EIP712 {
     error InvalidMessageHash();
     error WrongSignatureCount();
     error ThirdPartyCantReveal();
-    error ExpiredSignatures();
-    error SignatureAlreadyUsed();
+    error InvalidNonce();
 
     constructor() EIP712("SecretHolder", "0.1") {}
 
@@ -44,28 +43,30 @@ contract SecretHolder is EIP712 {
      * @param salt - (uint256) The salt used to calculate the hash.
      * @param signatures - (Signature[2]) ECDSA signatures of the calculated hash from the involved parties.
      */
-    function commitSecret(bytes32 secretHash, uint256 salt, bytes[] memory signatures) external {
+    function commitSecret(bytes32 secretHash, uint256 salt, uint256 nonceA, uint256 nonceB, bytes[] memory signatures) external {
         require(signatures.length == 2, WrongSignatureCount());
-        require(!signatureHashUsed[keccak256(signatures[0])], SignatureAlreadyUsed());
-        require(!signatureHashUsed[keccak256(signatures[1])], SignatureAlreadyUsed());
 
-        bytes32 hash = buildCommitHash(secretHash, salt);
+        bytes32 hashA = buildCommitHash(secretHash, salt, nonceA);
+        bytes32 hashB = buildCommitHash(secretHash, salt, nonceB);
 
-        address signerA = ECDSA.recover(hash, signatures[0]);
-        address signerB = ECDSA.recover(hash, signatures[1]);
+        address signerA = ECDSA.recover(hashA, signatures[0]);
+        address signerB = ECDSA.recover(hashB, signatures[1]);
+
+        require(nonces[signerA] == nonceA, InvalidNonce());
+        require(nonces[signerB] == nonceB, InvalidNonce());
+
+        nonces[signerA]++;
+        nonces[signerB]++;
 
         secrets[secretCount] = Secret({commitment: secretHash, salt: salt, partyA: signerA, partyB: signerB});
 
         emit SecretStored(secretCount, secretHash, signerA, signerB);
 
-        signatureHashUsed[keccak256(signatures[0])] = true;
-        signatureHashUsed[keccak256(signatures[1])] = true;
-
         secretCount++;
     }
 
-    function buildCommitHash(bytes32 secretHash, uint256 salt) public view returns (bytes32) {
-        bytes32 structHash = keccak256(abi.encode(SECRET_TYPEHASH, secretHash, salt));
+    function buildCommitHash(bytes32 secretHash, uint256 salt, uint256 nonce) public view returns (bytes32) {
+        bytes32 structHash = keccak256(abi.encode(SECRET_TYPEHASH, secretHash, salt, nonce));
         return _hashTypedDataV4(structHash);
     }
 

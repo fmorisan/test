@@ -1,6 +1,6 @@
 import { useState } from "react"
-import { bytesToHex, encodePacked, hexToBigInt, keccak256, parseAbi, stringToBytes } from "viem"
-import { useChainId, useSignTypedData, useWriteContract } from "wagmi"
+import { bytesToHex, encodePacked, hexToBigInt, keccak256, parseAbi, stringToBytes, zeroAddress } from "viem"
+import { useAccount, useChainId, useReadContract, useSignTypedData, useWriteContract } from "wagmi"
 import { Form, FormControl, FormField, FormItem, FormLabel } from "./ui/form"
 import { zodResolver } from '@hookform/resolvers/zod'
 
@@ -18,10 +18,12 @@ const formSchema = z.object({
 interface SignatureFormProps {
     message?: string,
     salt?: BigInt,
-    otherSignature?: `0x${string}`
+    otherSignature?: `0x${string}`,
+    otherSigner?: `0x${string}`,
 }
 
 export default function SecretForm(props: SignatureFormProps) {
+    const { address } = useAccount();
     const form = useForm<z.infer<typeof formSchema>>({
         resolver: zodResolver(formSchema),
         defaultValues: {
@@ -40,7 +42,23 @@ export default function SecretForm(props: SignatureFormProps) {
     const [dialogOpen, setDialogOpen] = useState<boolean>(false)
     const [dataFragment, setDataFragment] = useState<string>('')
 
+    const {data: myNonce} = useReadContract({
+        address: VERIFYING_CONTRACTS[chainid],
+        abi: parseAbi(CONTRACT_ABI),
+        functionName: 'nonces',
+        args: [address || zeroAddress]
+    })
+
+    const {data: counterpartyNonce} = useReadContract({
+        address: VERIFYING_CONTRACTS[chainid],
+        abi: parseAbi(CONTRACT_ABI),
+        functionName: 'nonces',
+        args: [props.otherSigner || zeroAddress]
+    })
+
+
     function onFormSubmitted(values: z.infer<typeof formSchema>) {
+        console.log(myNonce, counterpartyNonce)
         console.log(values)
         signTypedData({
             domain: {
@@ -53,7 +71,8 @@ export default function SecretForm(props: SignatureFormProps) {
             primaryType: "Secret",
             message: {
                 hash: keccak256(encodePacked(['bytes', 'uint256'], [bytesToHex(stringToBytes(values.message)), salt.valueOf()])),
-                salt: salt.valueOf()
+                salt: salt.valueOf(),
+                nonce: myNonce!
             },
         }, {
             onSuccess: (sig: `0x${string}`) => {
@@ -61,7 +80,7 @@ export default function SecretForm(props: SignatureFormProps) {
                 if (!props.otherSignature) {
                     // NOTE: Send URL to other party in order to get them to sign it and send it
                     const send = {
-                        sig: sig, message: values.message, hash, salt: salt.toString()
+                        sig: sig, message: values.message, hash, salt: salt.toString(), signer: address
                     }
 
                     let dataFragment = Buffer.from(
@@ -80,7 +99,7 @@ export default function SecretForm(props: SignatureFormProps) {
                             address: VERIFYING_CONTRACTS[chainid],
                             abi: parseAbi(CONTRACT_ABI),
                             functionName: 'commitSecret',
-                            args: [hash, salt.valueOf(), [sig, props.otherSignature]]
+                            args: [hash, salt.valueOf(), counterpartyNonce!, myNonce!, [sig, props.otherSignature]]
                         })
                 }
                 //location.hash = dataFragment
