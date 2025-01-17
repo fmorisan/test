@@ -21,12 +21,17 @@ contract SecretHolder is EIP712 {
     mapping(uint256 => Secret) public secrets;
     uint256 public secretCount = 0;
 
+    // @dev We must know if a signature has already been used in order to prevent replay attacks.
+    mapping(bytes32 => bool) internal signatureHashUsed;
+
     event SecretStored(uint256 indexed id, bytes32 indexed commitment, address partyA, address partyB);
     event SecretRevealed(uint256 indexed id, address indexed revealer, bytes message);
 
     error InvalidMessageHash();
     error WrongSignatureCount();
     error ThirdPartyCantReveal();
+    error ExpiredSignatures();
+    error SignatureAlreadyUsed();
 
     constructor() EIP712("SecretHolder", "0.1") {}
 
@@ -41,6 +46,8 @@ contract SecretHolder is EIP712 {
      */
     function commitSecret(bytes32 secretHash, uint256 salt, bytes[] memory signatures) external {
         require(signatures.length == 2, WrongSignatureCount());
+        require(!signatureHashUsed[keccak256(signatures[0])], SignatureAlreadyUsed());
+        require(!signatureHashUsed[keccak256(signatures[1])], SignatureAlreadyUsed());
 
         bytes32 hash = buildCommitHash(secretHash, salt);
 
@@ -50,6 +57,9 @@ contract SecretHolder is EIP712 {
         secrets[secretCount] = Secret({commitment: secretHash, salt: salt, partyA: signerA, partyB: signerB});
 
         emit SecretStored(secretCount, secretHash, signerA, signerB);
+
+        signatureHashUsed[keccak256(signatures[0])] = true;
+        signatureHashUsed[keccak256(signatures[1])] = true;
 
         secretCount++;
     }

@@ -134,4 +134,28 @@ contract CounterTest is Test {
         vm.expectRevert();
         secretHolder.revealSecret(secretId, "This is a test");
     }
+
+    // @dev A side effect of non-reusable signatures is that the salt can't be reused
+    //      for the same message
+    function test_commit_cant_replay() public {
+        bytes memory message = "Test";
+        uint256 salt = 0xFFFFFFFF;
+        _commitMessage(message, salt);
+
+        // NOTE: Signing logic is rolled into this function since we want to knwo which call reverts
+        //       and _commitMessage first calls a view function, which does not revert
+        bytes32 secretHash = keccak256(abi.encodePacked(message, salt));
+        bytes32 structHash = secretHolder.buildCommitHash(secretHash, salt);
+
+        bytes[] memory signatures = new bytes[](2);
+        (uint8 alice_v, bytes32 alice_r, bytes32 alice_s) = vm.sign(alice_pk, structHash);
+        (uint8 bob_v, bytes32 bob_r, bytes32 bob_s) = vm.sign(bob_pk, structHash);
+
+        // NOTE: OZ's ECDSA library expects the signature to be formed this way.
+        signatures[0] = abi.encodePacked(alice_r, alice_s, alice_v);
+        signatures[1] = abi.encodePacked(bob_r, bob_s, bob_v);
+
+        vm.expectRevert();
+        secretHolder.commitSecret(secretHash, salt, signatures);
+    }
 }
