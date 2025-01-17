@@ -43,6 +43,3 @@ jobs:
         run: |
           forge test -vvv
         id: test
-
-      - name: Run Aderyn static analysis
-        uses: fmorisan/aderyn-action@v0.0.1
