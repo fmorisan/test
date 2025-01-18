@@ -8,7 +8,7 @@ import "openzeppelin-contracts/contracts/utils/cryptography/EIP712.sol";
  * @author Felipe Buiras
  */
 contract SecretHolder is EIP712 {
-    bytes32 private constant SECRET_TYPEHASH = keccak256("Secret(bytes32 hash,uint256 salt,uint256 nonce)");
+    bytes32 private constant SECRET_TYPEHASH = keccak256("Secret2(bytes32 hash,address partyA,address partyB,uint256 nonceA,uint256 nonceB)");
 
     struct Secret {
         bytes32 commitment;
@@ -31,6 +31,7 @@ contract SecretHolder is EIP712 {
     error WrongSignatureCount();
     error ThirdPartyCantReveal();
     error InvalidNonce();
+    error InvalidSignature();
 
     constructor() EIP712("SecretHolder", "0.1") {}
 
@@ -41,32 +42,31 @@ contract SecretHolder is EIP712 {
      *      be kept in the contract's storage for later retrieval.
      * @param secretHash - (bytes32) Message hash: keccak256(abi.encode(message, salt))
      * @param salt - (uint256) The salt used to calculate the hash.
+     * @param partyA - (address) One of the signing parties
+     * @param partyB - (address) The other of the signing parties
      * @param signatures - (Signature[2]) ECDSA signatures of the calculated hash from the involved parties.
      */
-    function commitSecret(bytes32 secretHash, uint256 salt, uint256 nonceA, uint256 nonceB, bytes[] memory signatures) external {
+    function commitSecret(bytes32 secretHash, uint256 salt, address partyA, address partyB, bytes[] memory signatures) external {
         require(signatures.length == 2, WrongSignatureCount());
 
-        bytes32 hashA = buildCommitHash(secretHash, salt, nonceA);
-        bytes32 hashB = buildCommitHash(secretHash, salt, nonceB);
+        bytes32 hash = buildCommitHash(secretHash, salt, partyA, partyB, nonces[partyA]++, nonces[partyB]++);
 
-        address signerA = ECDSA.recover(hashA, signatures[0]);
-        address signerB = ECDSA.recover(hashB, signatures[1]);
+        address signerA = ECDSA.recover(hash, signatures[0]);
+        address signerB = ECDSA.recover(hash, signatures[1]);
 
-        require(nonces[signerA] == nonceA, InvalidNonce());
-        require(nonces[signerB] == nonceB, InvalidNonce());
-
-        nonces[signerA]++;
-        nonces[signerB]++;
+        require(signerA == partyA, InvalidSignature());
+        require(signerB == partyB, InvalidSignature());
 
         secrets[secretCount] = Secret({commitment: secretHash, salt: salt, partyA: signerA, partyB: signerB});
 
         emit SecretStored(secretCount, secretHash, signerA, signerB);
 
         secretCount++;
+        
     }
 
-    function buildCommitHash(bytes32 secretHash, uint256 salt, uint256 nonce) public view returns (bytes32) {
-        bytes32 structHash = keccak256(abi.encode(SECRET_TYPEHASH, secretHash, salt, nonce));
+    function buildCommitHash(bytes32 secretHash, uint256 salt, address partyA, address partyB, uint256 nonceA, uint256 nonceB) public view returns (bytes32) {
+        bytes32 structHash = keccak256(abi.encode(SECRET_TYPEHASH, secretHash, salt, partyA, partyB, nonceA, nonceB));
         return _hashTypedDataV4(structHash);
     }
 

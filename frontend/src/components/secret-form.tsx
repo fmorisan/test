@@ -1,6 +1,6 @@
 import { useState } from "react"
-import { bytesToHex, encodePacked, hexToBigInt, keccak256, parseAbi, stringToBytes, zeroAddress } from "viem"
-import { useAccount, useChainId, useReadContract, useSignTypedData, useWriteContract } from "wagmi"
+import { bytesToHex, encodePacked, hexToBigInt, keccak256, parseAbi, parseTransaction, stringToBytes, zeroAddress } from "viem"
+import { useAccount, useChainId, useClient, useReadContract, useSignTypedData, useWriteContract } from "wagmi"
 import { Form, FormControl, FormField, FormItem, FormLabel } from "./ui/form"
 import { zodResolver } from '@hookform/resolvers/zod'
 
@@ -10,56 +10,72 @@ import { Input } from "./ui/input"
 import { Button } from "./ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "./ui/dialog"
 import { CONTRACT_ABI, SIGN_TYPES, VERIFYING_CONTRACTS } from "@/config/contracts"
+import { readContract } from "viem/actions"
 
 const formSchema = z.object({
     message: z.string(),
-})
+    partyA: z.string(),
+    partyB: z.string()
+}).refine((obj: any) => obj.partyA !== obj.partyB)
+
+export interface PrefilledMessageParams {
+    partyA: `0x${string}`
+    partyB: `0x${string}`
+}
+
+export interface FragmentData {
+    sig: `0x${string}`
+    message: string
+    salt: string
+    prefilled: PrefilledMessageParams,
+}
 
 interface SignatureFormProps {
-    message?: string,
-    salt?: BigInt,
     otherSignature?: `0x${string}`,
-    otherSigner?: `0x${string}`,
+    data: FragmentData | null
 }
 
 export default function SecretForm(props: SignatureFormProps) {
-    const { address } = useAccount();
+    const client = useClient()
+    const { address } = useAccount()
     const form = useForm<z.infer<typeof formSchema>>({
         resolver: zodResolver(formSchema),
         defaultValues: {
-            message: props.message || ''
+            message: props.data?.message || '',
+            partyA: props.data?.prefilled.partyA || address!,
+            partyB: props.data?.prefilled.partyB || address!
         }
     })
     const { writeContract } = useWriteContract()
     const { signTypedData } = useSignTypedData()
     const chainid = useChainId()
     const [salt, setSalt] = useState<BigInt>(
-        props.salt
-        || hexToBigInt(
+        props.data?.salt ? BigInt(props.data?.salt)
+        : hexToBigInt(
             keccak256(encodePacked(['string'], ["TODO: make this actually random"]))
         )
     )
     const [dialogOpen, setDialogOpen] = useState<boolean>(false)
     const [dataFragment, setDataFragment] = useState<string>('')
 
-    const {data: myNonce} = useReadContract({
-        address: VERIFYING_CONTRACTS[chainid],
-        abi: parseAbi(CONTRACT_ABI),
-        functionName: 'nonces',
-        args: [address || zeroAddress]
-    })
+    async function onFormSubmitted(values: z.infer<typeof formSchema>) {
 
-    const {data: counterpartyNonce} = useReadContract({
-        address: VERIFYING_CONTRACTS[chainid],
-        abi: parseAbi(CONTRACT_ABI),
-        functionName: 'nonces',
-        args: [props.otherSigner || zeroAddress]
-    })
+        const nonceA = await readContract(client!, {
+            address: VERIFYING_CONTRACTS[chainid],
+            abi: parseAbi(CONTRACT_ABI),
+            functionName: 'nonces',
+            args: [values.partyA as `0x${string}`]
+        })
 
+        const nonceB = await readContract(client!, {
+            address: VERIFYING_CONTRACTS[chainid],
+            abi: parseAbi(CONTRACT_ABI),
+            functionName: 'nonces',
+            args: [values.partyB as `0x${string}`]
+        })
 
-    function onFormSubmitted(values: z.infer<typeof formSchema>) {
-        console.log(myNonce, counterpartyNonce)
-        console.log(values)
+        console.log(nonceA, nonceB)
+
         signTypedData({
             domain: {
                 version: "0.1",
@@ -72,34 +88,41 @@ export default function SecretForm(props: SignatureFormProps) {
             message: {
                 hash: keccak256(encodePacked(['bytes', 'uint256'], [bytesToHex(stringToBytes(values.message)), salt.valueOf()])),
                 salt: salt.valueOf(),
-                nonce: myNonce!
+                partyA: values.partyA as `0x${string}`,
+                partyB: values.partyB as `0x${string}`,
+                nonceA: nonceA,
+                nonceB: nonceB
             },
         }, {
-            onSuccess: (sig: `0x${string}`) => {
+            onSuccess: (sig: `0x${string}`, args) => {
                 const hash = keccak256(encodePacked(['bytes', 'uint256'], [bytesToHex(stringToBytes(values.message)), salt.valueOf()]))
-                if (!props.otherSignature) {
-                    // NOTE: Send URL to other party in order to get them to sign it and send it
-                    const send = {
-                        sig: sig, message: values.message, hash, salt: salt.toString(), signer: address
-                    }
+                if (!props.data?.sig) {
+                    console.log("no sig from fragment")
 
+                    const fragmentBuild: FragmentData = {
+                        sig,
+                        message: values.message,
+                        salt: salt.toString(),
+                        prefilled: {
+                            partyA: values.partyA as `0x${string}`,
+                            partyB: values.partyB as `0x${string}`
+                        }
+                    }
+                    // NOTE: Send URL to other party in order to get them to sign it and send it
                     let dataFragment = Buffer.from(
-                            JSON.stringify(send)
+                            JSON.stringify({sig, message: values.message, prefilled: {hash: hash, salt: salt.toString(), partyA: values.partyA, partyB: values.partyB}})
                     ).toString('base64')
 
                     setDataFragment(dataFragment)
                     setDialogOpen(true)
-
-                    console.log(
-                        send
-                    )
                 } else {
                     // NOTE: we have both signatures now.
+                    console.log("HAVE sig from fragment")
                         writeContract({
                             address: VERIFYING_CONTRACTS[chainid],
                             abi: parseAbi(CONTRACT_ABI),
                             functionName: 'commitSecret',
-                            args: [hash, salt.valueOf(), counterpartyNonce!, myNonce!, [sig, props.otherSignature]]
+                            args: [hash, salt.valueOf(), nonceA, nonceB, [props.data.sig, sig]]
                         })
                 }
                 //location.hash = dataFragment
@@ -111,6 +134,22 @@ export default function SecretForm(props: SignatureFormProps) {
 
     return <Form {...form}>
         <form onSubmit={form.handleSubmit(onFormSubmitted)} className="space-y-8 space-x-8">
+            <FormField control={form.control} name="partyA" render={({field}: {field: any}) =>
+                <FormItem>
+                <FormLabel>Signer 1</FormLabel>
+                <FormControl>
+                    <Input placeholder="hello!" {...field} />
+                </FormControl>
+                </FormItem>
+            }/>
+            <FormField control={form.control} name="partyB" render={({field}: {field: any}) =>
+                <FormItem>
+                <FormLabel>Signer 2</FormLabel>
+                <FormControl>
+                    <Input placeholder="hello!" {...field} />
+                </FormControl>
+                </FormItem>
+            }/>
             <FormField control={form.control} name="message" render={({field}: {field: any}) =>
                 <FormItem>
                 <FormLabel>Message to sign</FormLabel>

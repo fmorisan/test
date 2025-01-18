@@ -15,7 +15,10 @@ export const SIGN_TYPES = {
     Secret: [
         {name: 'hash', type: 'bytes32'},
         {name: 'salt', type: 'uint256'},
-        {name: 'nonce', type: 'uint256'},
+        {name: 'partyA', type: 'address'},
+        {name: 'partyB', type: 'address'},
+        {name: 'nonceA', type: 'uint256'},
+        {name: 'nonceB', type: 'uint256'},
     ],
     EIP712Domain: [
         {name: 'name', type: 'string'},
