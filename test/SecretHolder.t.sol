@@ -74,7 +74,7 @@ contract CounterTest is Test {
         signatures[0] = abi.encodePacked(alice_r, alice_s, alice_v);
         signatures[1] = abi.encodePacked(bob_r, bob_s, bob_v);
 
-        vm.expectRevert(SecretHolder.InvalidSignature.selector);
+        vm.expectRevert(abi.encodeWithSelector(SecretHolder.InvalidSignature.selector, alice));
         secretHolder.commitSecret(secretHash, salt, alice, bob, signatures);
     }
 

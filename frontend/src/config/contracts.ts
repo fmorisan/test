@@ -1,5 +1,5 @@
 export const CONTRACT_ABI = [
-    "function commitSecret(bytes32 hash, uint256 salt, uint256 nonceA, uint256 nonceB, bytes[] signatures) public",
+    "function commitSecret(bytes32 hash, uint256 salt, address partyA, address partyB, bytes[] signatures) public",
     "function revealSecret(uint256 id, string memory message) public",
     "function secrets(uint256 id) public view returns (bytes32 commitment, address partyA, address partyB, uint256 salt)",
     "function secretCount() public view returns (uint256)",

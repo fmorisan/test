@@ -8,7 +8,7 @@ import "openzeppelin-contracts/contracts/utils/cryptography/EIP712.sol";
  * @author Felipe Buiras
  */
 contract SecretHolder is EIP712 {
-    bytes32 private constant SECRET_TYPEHASH = keccak256("Secret2(bytes32 hash,address partyA,address partyB,uint256 nonceA,uint256 nonceB)");
+    bytes32 private constant SECRET_TYPEHASH = keccak256("Secret(bytes32 hash,uint256 salt,address partyA,address partyB,uint256 nonceA,uint256 nonceB)");
 
     struct Secret {
         bytes32 commitment;
@@ -31,7 +31,7 @@ contract SecretHolder is EIP712 {
     error WrongSignatureCount();
     error ThirdPartyCantReveal();
     error InvalidNonce();
-    error InvalidSignature();
+    error InvalidSignature(address expectedSigner);
 
     constructor() EIP712("SecretHolder", "0.1") {}
 
@@ -49,13 +49,16 @@ contract SecretHolder is EIP712 {
     function commitSecret(bytes32 secretHash, uint256 salt, address partyA, address partyB, bytes[] memory signatures) external {
         require(signatures.length == 2, WrongSignatureCount());
 
-        bytes32 hash = buildCommitHash(secretHash, salt, partyA, partyB, nonces[partyA]++, nonces[partyB]++);
+        bytes32 hash = buildCommitHash(secretHash, salt, partyA, partyB, nonces[partyA], nonces[partyB]);
 
         address signerA = ECDSA.recover(hash, signatures[0]);
         address signerB = ECDSA.recover(hash, signatures[1]);
 
-        require(signerA == partyA, InvalidSignature());
-        require(signerB == partyB, InvalidSignature());
+        require(signerA == partyA, InvalidSignature(partyA));
+        require(signerB == partyB, InvalidSignature(partyB));
+
+        nonces[partyA]++;
+        nonces[partyB]++;
 
         secrets[secretCount] = Secret({commitment: secretHash, salt: salt, partyA: signerA, partyB: signerB});
 
