@@ -114,4 +114,50 @@ contract CounterTest is Test {
         vm.expectRevert(SecretHolder.ThirdPartyCantReveal.selector);
         secretHolder.revealSecret(secretId, "This is a test");
     }
+
+    function test_revealSigned() public {
+        uint256 secretId = _commitMessage("This is a test", 0xFFFF_FFFF);
+        uint256 aliceNonce = secretHolder.nonces(alice);
+
+        bytes32 structHash = secretHolder.buildRevealHash("This is a test", secretId, aliceNonce);
+        (uint8 alice_v, bytes32 alice_r, bytes32 alice_s) = vm.sign(alice_pk, structHash);
+
+        secretHolder.revealSecretSigned(secretId, "This is a test", aliceNonce, abi.encodePacked(alice_r, alice_s, alice_v));
+    }
+
+
+    function test_revealSigned_cannotReuseSignature() public {
+        uint256 secretId = _commitMessage("This is a test", 0xFFFF_FFFF);
+        uint256 aliceNonce = secretHolder.nonces(alice);
+
+        bytes32 structHash = secretHolder.buildRevealHash("This is a test", secretId, aliceNonce);
+        (uint8 alice_v, bytes32 alice_r, bytes32 alice_s) = vm.sign(alice_pk, structHash);
+
+        secretHolder.revealSecretSigned(secretId, "This is a test", aliceNonce, abi.encodePacked(alice_r, alice_s, alice_v));
+
+        vm.expectRevert(SecretHolder.InvalidNonce.selector);
+        secretHolder.revealSecretSigned(secretId, "This is a test", aliceNonce, abi.encodePacked(alice_r, alice_s, alice_v));
+    }
+
+    function test_RevertIf_invalidMessage_revealSigned() public {
+        uint256 secretId = _commitMessage("This is a test", 0xFFFF_FFFF);
+        uint256 aliceNonce = secretHolder.nonces(alice);
+
+        bytes32 structHash = secretHolder.buildRevealHash("THIS IS THE WRONG MESSAGE", secretId, aliceNonce);
+        (uint8 alice_v, bytes32 alice_r, bytes32 alice_s) = vm.sign(alice_pk, structHash);
+
+        vm.expectRevert(SecretHolder.InvalidMessageHash.selector);
+        secretHolder.revealSecretSigned(secretId, "THIS IS THE WRONG MESSAGE", aliceNonce, abi.encodePacked(alice_r, alice_s, alice_v));
+    }
+
+    function test_RevertIf_signedByThirdParty_revealSigned() public {
+        uint256 secretId = _commitMessage("This is a test", 0xFFFF_FFFF);
+        uint256 carlNonce = secretHolder.nonces(carl);
+
+        bytes32 structHash = secretHolder.buildRevealHash("THIS IS THE WRONG MESSAGE", secretId, carlNonce);
+        (uint8 carl_v, bytes32 carl_r, bytes32 carl_s) = vm.sign(carl_pk, structHash);
+
+        vm.expectRevert(SecretHolder.ThirdPartyCantReveal.selector);
+        secretHolder.revealSecretSigned(secretId, "THIS IS THE WRONG MESSAGE", carlNonce, abi.encodePacked(carl_r, carl_s, carl_v));
+    }
 }

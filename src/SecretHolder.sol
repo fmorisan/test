@@ -9,6 +9,7 @@ import "openzeppelin-contracts/contracts/utils/cryptography/EIP712.sol";
  */
 contract SecretHolder is EIP712 {
     bytes32 private constant SECRET_TYPEHASH = keccak256("Secret(bytes32 hash,uint256 salt,address partyA,address partyB,uint256 nonceA,uint256 nonceB)");
+    bytes32 private constant REVEAL_TYPEHASH = keccak256("Reveal(uint256 id,bytes message,uint256 nonce)");
 
     struct Secret {
         bytes32 commitment;
@@ -25,7 +26,7 @@ contract SecretHolder is EIP712 {
     mapping(address => uint256) public nonces;
 
     event SecretStored(uint256 indexed id, bytes32 indexed commitment, address partyA, address partyB);
-    event SecretRevealed(uint256 indexed id, address indexed revealer, bytes message);
+    event SecretRevealed(uint256 indexed id, address indexed revealer, string message);
 
     error InvalidMessageHash();
     error WrongSignatureCount();
@@ -74,7 +75,7 @@ contract SecretHolder is EIP712 {
     }
 
     /**
-     * @notice Reveal a previously commited secret.
+     * @notice Reveal a previously comitted secret.
      * @dev The stored secret metadata will be deleted from the contract after successful execution.
      * @param id - The identifier of the previously commited secret.
      * @param secretMessage - The commited message, without salting.
@@ -86,7 +87,38 @@ contract SecretHolder is EIP712 {
         bytes32 hash = keccak256(abi.encodePacked(secretMessage, secret.salt));
         require(hash == secret.commitment, InvalidMessageHash());
 
-        emit SecretRevealed(id, msg.sender, bytes(secretMessage));
+        emit SecretRevealed(id, msg.sender, secretMessage);
         delete secrets[id];
+    }
+
+    /**
+     * @notice Reveal a previously comitted secret via an off-chain signature.
+     * @dev The stored secret metadata will be deleted from the contract after successful execution.
+     * @param id - The identifier of the previously commited secret.
+     * @param secretMessage - The commited message, without salting.
+     * @param nonce - The current nonce of the signer.
+     * @param signature - The signature of the {Reveal} message.
+     */
+    function revealSecretSigned(uint256 id, string memory secretMessage, uint256 nonce, bytes memory signature) external {
+        Secret storage secret = secrets[id];
+        bytes32 revealHash = buildRevealHash(bytes(secretMessage), id, nonce);
+
+        address signer = ECDSA.recover(revealHash, signature);
+
+        require(nonces[signer] == nonce, InvalidNonce());
+        nonces[signer]++;
+
+        require(signer == secret.partyA || signer == secret.partyB, ThirdPartyCantReveal());
+
+        require(keccak256(abi.encodePacked(secretMessage, secret.salt)) == secret.commitment, InvalidMessageHash());
+
+        emit SecretRevealed(id, msg.sender, secretMessage);
+        delete secrets[id];
+
+    }
+
+    function buildRevealHash(bytes memory secret, uint256 id, uint256 nonce) public view returns (bytes32) {
+        bytes32 structHash = keccak256(abi.encode(REVEAL_TYPEHASH, id, keccak256(secret), nonce));
+        return _hashTypedDataV4(structHash);
     }
 }

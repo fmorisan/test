@@ -1,6 +1,6 @@
 import { useState } from "react"
 import { bytesToHex, encodePacked, hashTypedData, hexToBigInt, keccak256, parseAbi, stringToBytes } from "viem"
-import { useChainId, useReadContract, useSignTypedData, useWriteContract } from "wagmi"
+import { useAccount, useChainId, useReadContract, useSignTypedData, useWriteContract } from "wagmi"
 import { Form, FormControl, FormField, FormItem, FormLabel } from "./ui/form"
 import { zodResolver } from '@hookform/resolvers/zod'
 
@@ -22,6 +22,8 @@ interface SignatureFormProps {
 
 export default function RevealForm(props: SignatureFormProps) {
     const chainid = useChainId()
+    const { address } = useAccount()
+    const { signTypedData } = useSignTypedData()
     const { data } = useReadContract({
         address: VERIFYING_CONTRACTS[chainid],
         abi: parseAbi(CONTRACT_ABI),
@@ -41,14 +43,39 @@ export default function RevealForm(props: SignatureFormProps) {
     let [commitment, partyA, partyB, salt] = data || []
     let calculatedCommitmentHash = keccak256(encodePacked(['bytes', 'uint256'], [bytesToHex(stringToBytes(inputMessage)), salt || 0n]))
 
+    const {data: myNonce} = useReadContract({
+        address: VERIFYING_CONTRACTS[chainid],
+        abi: parseAbi(CONTRACT_ABI),
+        functionName: 'nonces',
+        args: [address!]
+    })
+
     if (!data) { return <>Loading secret {props.secretId}...</> }
 
     function onFormSubmitted(values: z.infer<typeof formSchema>) {
-        writeContract({
-            address: VERIFYING_CONTRACTS[chainid],
-            abi: parseAbi(CONTRACT_ABI),
-            functionName: 'revealSecret',
-            args: [props.secretId, values.message]
+        signTypedData({
+            types: SIGN_TYPES,
+            domain: {
+                version: "0.1",
+                name: "SecretHolder",
+                verifyingContract: VERIFYING_CONTRACTS[chainid],
+                chainId: BigInt(chainid).valueOf()
+            },
+            primaryType: 'Reveal',
+            message: {
+                id: props.secretId,
+                message: bytesToHex(stringToBytes(values.message)),
+                nonce: myNonce!
+            }
+        }, {
+            onSuccess: (signature) => {
+                writeContract({
+                    address: VERIFYING_CONTRACTS[chainid],
+                    abi: parseAbi(CONTRACT_ABI),
+                    functionName: 'revealSecretSigned',
+                    args: [props.secretId, values.message, myNonce!, signature]
+                })
+            }
         })
     }
 
